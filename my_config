@@ -1,0 +1,12 @@
+{
+    "task": "on_demand_pred",
+    "model": "STGCN",
+    "dataset": "SZ_TAXI",
+    "device": "cpu",
+    "train_rate": 0.7,
+    "eval_rate": 0.1,
+    "test_rate": 0.2,
+    "input_window": 12,
+    "output_window": 3,
+    "max_epoch": 5
+}

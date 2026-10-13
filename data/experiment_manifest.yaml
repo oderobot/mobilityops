@@ -1,0 +1,83 @@
+# ============================================================
+# experiment_manifest.yaml —— MobilityOps Agent 所有数字的唯一来源
+# 规则（开发文档 §2）：任何论文/实验数字先进这里，标注 source 与口径；
+# README、简历、Tool 注释、Eval 一律从这里复制，禁止凭记忆引用。
+# 状态机：pending_verification（未核验）→ verified（有 source 证据）
+# ============================================================
+manifest_version: "1.1"
+last_updated: "2026-09-30"
+
+dataset:
+  name: SZ_TAXI
+  source: "LibCity (Bigscity-LibCity) 公开数据集"
+  regions: 156                       # ✅ verified: SZ_TAXI.geo 共 156 行
+  geo_id_range: [90217, 117189]      # ✅ verified: 真实 entity_id；工具接口用 0-155 矩阵索引，内部需映射
+  time_granularity_minutes: 15       # ✅ verified 2026-09-30: dyna 时间戳相邻间隔 900s（直接证据）
+                                     #    + config.json time_intervals=900（间接证据）；旧文档"10 分钟"作废
+  total_time_slices: 2976            # ✅ verified: dyna 唯一时间戳计数，2015-01-01 起约 31 天
+  test_slices: 591                   # ✅ verified: 日志 exp_id=87576 "test x: (591, 12, 156, 1)"
+  test_slices_padded: 640            # ⚠️ 预测 npz 为 640 行 = 591 经 pad_with_last_sample 填充到
+                                     #    batch_size=64 的倍数；末 49 行为重复填充，消费时必须截断
+  split: {train: 0.7, eval: 0.1, test: 0.2}   # ✅ verified: 同上日志
+
+experiments:
+  speed_prediction:
+    model: STGCN
+    run:
+      exp_id: 87576
+      log: "87576-STGCN-SZ_TAXI-Jun-02-2026_18-41-15.log"
+      result_csv: "stgcn-result.csv"
+      date: "2026-06-02"
+    config:                          # ✅ verified: 日志配置行
+      input_window: 12
+      output_window: 12
+      scaler: {type: standard, mean: 13.1704, std: 13.5216}
+      graph_conv: chebconv
+      batch_size: 64
+      max_epoch: 100
+    horizon_steps: 12                # ✅ verified: output_window=12
+    mae:
+      value: 2.78                    # 精确值 2.7772
+      std: 0.08                      # 精确值 0.0846
+      unit: "km/h"
+      split: test
+      aggregation: "mean_over_12_horizon_steps（每步 MAE 已是测试集均值；std 跨 12 步）"
+      source: "stgcn-result.csv（LibCity TrafficStateEvaluator 输出）"
+      status: verified               # ✅ 2026-09-30
+      note: "这是测试集统计口径，严禁当作单次预测的置信度"
+    mae_step1:
+      value: 2.62                    # 精确值 2.6217，论文代码硬编码打印的来源
+      note: "第 1 步预测 MAE；与均值 2.78 不矛盾，口径不同"
+      status: verified
+    mape:
+      value: null
+      note: "inf：数据含 0 速度导致除零，MAPE 对本数据集不可用；论文只报 MAE/RMSE"
+      status: verified
+    baseline:
+      model: RNN
+      run: {exp_id: 87436, result_csv: "rnn-result.csv"}
+      mae: {value: 3.03, std: 0.02, unit: "km/h", split: test,
+            aggregation: "mean_over_12_horizon_steps",
+            source: "rnn-result.csv", status: verified}   # 精确值 3.0340±0.0233
+
+  dispatch:
+    code: "dispatch_thesis_v9_fast.py（v9.0 快速版：源区域惩罚 3.0）"
+    verified_run: "2026-09-30 用户本地运行，exit 0"
+    demand_model: "合成均匀需求 base_demand=0.5/区域/片 × 容量衰减 ρ(v)；非真实订单"
+    prediction_horizon_used: 1       # ⚠️ 端到端实验只消费第 1 步预测（prediction[:, 0, :]）
+    init_supply: "260 辆车按 seed 均匀随机撒点（合成）"
+    instances: 100                   # ✅ 10 时间片 × 10 seeds
+    seeds: 10
+    method: CA-MIP
+    osr: {value: 0.907, std: 0.011, n: 100, status: verified}        # ✅ 2026-09-30 运行
+    baselines:
+      - {method: No-Dispatch,      osr: 0.723, std: 0.028, status: verified}
+      - {method: Random,           osr: 0.872, std: 0.011, status: verified}
+      - {method: Demand-Only,      osr: 0.830, std: 0.014, status: verified}
+      - {method: Nearest-Neighbour, osr: 0.922, std: 0.009, status: verified,
+         note: "上帝视角基线：决策时使用真实需求；CA-MIP 低 1.5pp 部分源于此+拓扑限制，负结果保留"}
+    significance: null               # 不沿用论文 p 值；新实验有 seed-level 数据才计算
+
+pending_items:
+  - "distance matrix 口径：RoadNetwork weighted 版（link_weight=0→2, 1→1）vs build_real_distance.py 跳数版，以实际缓存为准"
+  - "预测 npz 的具体产出 run（19:52:43）与日志 exp_id 的对应关系待确认"
